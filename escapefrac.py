@@ -12,6 +12,36 @@ def rhoHI(f) :
     return f['rho']*f['HI']
 
 
+class translate(object) :
+    def __init__(self, f, shift) :
+        """Form a context manager for translating the simulation *f* by the given
+        spatial *shift*.
+
+        This allows you to enclose a code block within which the simulation is offset
+        by the specified amount. On exiting the code block, you are guaranteed the
+        simulation is put back to where it started, so
+
+        with translate(f, shift) :
+            print f['pos'][0]
+
+        is equivalent to
+
+        try:
+            f['pos']+=shift
+            print f['pos'][0]
+        finally:
+            f['pos']-=shift
+        """
+
+        
+        self.f = f
+        self.shift = shift
+
+    def __enter__(self) :
+        self.f['pos']+=self.shift
+
+    def __exit__(self, *args) :
+        self.f['pos']-=self.shift
 
 class quiet(object) :
     def __enter__(self) :
