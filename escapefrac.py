@@ -1,6 +1,6 @@
 import pynbody
 import numpy as np
-import healpy as hp
+#import healpy as hp
 import pylab as p
 import math
 import contextlib
@@ -68,6 +68,27 @@ def escape_fraction_from_position(f, pos, to_distance=100.0,nside=64,plot=True) 
     esc_frac_per_pixel = np.exp(-6.3e-18*im)
     return esc_frac_per_pixel.mean()
 
+def cuboid_escape_fraction(f, pos, to_distance=100.0, nside=64) :
+    def mkimage(X) :
+        return pynbody.plot.sph.image(X,width=to_distance*2,qty='rhoHI', units='m_p cm^-2',noplot=True,z_camera=to_distance)
+
+    def get_sides(f) :
+        with translate(f,[0.0,0.0,-to_distance]) :
+            side_a = mkimage(f.gas[pynbody.filt.BandPass('z',0,to_distance)])
+        with translate(f,[0.0,0.0,+to_distance]) :
+            side_b = mkimage(f.gas[pynbody.filt.BandPass('z',0,to_distance)])
+        return side_a,side_b
+    
+    with translate(f,-pos) :
+        side_a,side_b = get_sides(f)
+        """
+        with f.rotate_x(90) :
+            side_c,side_d = get_sides(f)
+        with f.rotate_y(90) :
+            side_e,side_f = get_sides(f)
+        """
+    return side_a
+        
 
 def dirty_escape_fraction_from_position(f, pos, to_distance=100.0,nside=64,plot=True,
                                         skysize=0.1) :
