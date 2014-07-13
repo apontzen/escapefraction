@@ -1,47 +1,22 @@
 import pynbody
 import numpy as np
-#import healpy as hp
+import healpy as hp
 import pylab as p
 import math
 import contextlib
 import sys
 import os
+import pyximport
+pyximport.install(setup_args={'include_dirs': np.get_include()},reload_support=True)
+import grid_angle
+
+from pynbody.transformation import translate, rotate_x, rotate_y, rotate_z
 
 @pynbody.derived_array
 def rhoHI(f) :
     return f['rho']*f['HI']
 
 
-class translate(object) :
-    def __init__(self, f, shift) :
-        """Form a context manager for translating the simulation *f* by the given
-        spatial *shift*.
-
-        This allows you to enclose a code block within which the simulation is offset
-        by the specified amount. On exiting the code block, you are guaranteed the
-        simulation is put back to where it started, so
-
-        with translate(f, shift) :
-            print f['pos'][0]
-
-        is equivalent to
-
-        try:
-            f['pos']+=shift
-            print f['pos'][0]
-        finally:
-            f['pos']-=shift
-        """
-
-        
-        self.f = f
-        self.shift = shift
-
-    def __enter__(self) :
-        self.f['pos']+=self.shift
-
-    def __exit__(self, *args) :
-        self.f['pos']-=self.shift
 
 class quiet(object) :
     def __enter__(self) :
@@ -68,26 +43,42 @@ def escape_fraction_from_position(f, pos, to_distance=100.0,nside=64,plot=True) 
     esc_frac_per_pixel = np.exp(-6.3e-18*im)
     return esc_frac_per_pixel.mean()
 
-def cuboid_escape_fraction(f, pos, to_distance=100.0, nside=64) :
-    def mkimage(X) :
-        return pynbody.plot.sph.image(X,width=to_distance*2,qty='rhoHI', units='m_p cm^-2',noplot=True,z_camera=to_distance)
+def cuboid_escape_fraction(f, pos, to_distance=100.0, resolution=500) :
+    pixel_solid_angles = grid_angle.grid_pixel_angles(to_distance,to_distance*2,resolution)
+    
+    def mkimage(X,star_point) :
+        im =  pynbody.plot.sph.image(X,width=to_distance*2,qty='rhoHI', units='m_p cm^-2',noplot=False,z_camera=star_point,resolution=resolution)
+        im = np.exp(-6.3e-18*im).view(np.ndarray)
+        return im
 
     def get_sides(f) :
-        with translate(f,[0.0,0.0,-to_distance]) :
-            side_a = mkimage(f.gas[pynbody.filt.BandPass('z',0,to_distance)])
-        with translate(f,[0.0,0.0,+to_distance]) :
-            side_b = mkimage(f.gas[pynbody.filt.BandPass('z',0,to_distance)])
+        state = f.gas
+        try :
+            state = translate(state,[0.0,0.0,to_distance])
+            side_a = mkimage(f.gas[pynbody.filt.BandPass('z',0,to_distance)],to_distance)
+            
+            state = translate(state,[0.0,0.0,-2*to_distance])
+            side_b = mkimage(f.gas[pynbody.filt.BandPass('z',-to_distance,0)],-to_distance)
+
+        finally :
+            state.revert()
+            
         return side_a,side_b
     
     with translate(f,-pos) :
-        side_a,side_b = get_sides(f)
-        """
-        with f.rotate_x(90) :
+        state = f.gas
+        try:
+            side_a,side_b = get_sides(f)
+            state = rotate_x(state,90)
             side_c,side_d = get_sides(f)
-        with f.rotate_y(90) :
-            side_e,side_f = get_sides(f)
-        """
-    return side_a
+            state = rotate_y(rotate_x(state,-90,defer=True),90)
+
+            with f.gas.rotate_y(90) :
+                side_e,side_f = get_sides(f)
+
+
+    return (side_a*pixel_solid_angles+side_b*pixel_solid_angles+side_c*pixel_solid_angles+
+            side_d*pixel_solid_angles+side_e*pixel_solid_angles+side_f*pixel_solid_angles).sum()/(6*pixel_solid_angles.sum())
         
 
 def dirty_escape_fraction_from_position(f, pos, to_distance=100.0,nside=64,plot=True,
